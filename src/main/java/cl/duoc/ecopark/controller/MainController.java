@@ -14,6 +14,7 @@ import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.fxml.FXML;
 import javafx.scene.control.*;
+import javafx.util.converter.IntegerStringConverter;
 
 import java.io.IOException;
 import java.text.NumberFormat;
@@ -27,33 +28,34 @@ public class MainController {
     @FXML private TextField patenteField;
     @FXML private TextField horasField;
     @FXML private CheckBox convenioCheck;
+    @FXML private TextField buscarPatenteField;
+    @FXML private TextField nuevasHorasField;
     @FXML private TableView<Estadia> estadiasTable;
+    @FXML private TableColumn<Estadia, Number> idCol;
     @FXML private TableColumn<Estadia, String> tipoCol;
     @FXML private TableColumn<Estadia, String> patenteCol;
     @FXML private TableColumn<Estadia, Number> horasCol;
     @FXML private TableColumn<Estadia, String> costoCol;
     @FXML private Label mensajeLabel;
+    @FXML private Label estadisticasLabel;
 
-    private final ObservableList<Estadia> filas =
-            FXCollections.observableArrayList();
+    private final ObservableList<Estadia> filas = FXCollections.observableArrayList();
 
-    private final EstadiaRepository repository =
-            new EstadiaRepository(
-                    new MySqlEstadiaDAO()
-            );
+    private final EstadiaRepository repository = new EstadiaRepository(new MySqlEstadiaDAO());
 
-    private final NumberFormat formatoPesos =
-            NumberFormat.getIntegerInstance(Locale.forLanguageTag("es-CL"));
+    private final NumberFormat formatoPesos = NumberFormat.getIntegerInstance(Locale.forLanguageTag("es-CL"));
 
     @FXML
     private void initialize() {
         tipoCombo.getItems().addAll("Auto", "Moto");
         tipoCombo.getSelectionModel().selectFirst();
 
-        tipoCombo.valueProperty().addListener((obs, anterior, actual) ->
-                actualizarConvenio());
+        tipoCombo.valueProperty().addListener((obs, antes, despues) -> actualizarConvenio());
         actualizarConvenio();
 
+        horasField.setTextFormatter(soloNumeros());
+
+        idCol.setCellValueFactory(dato -> new ReadOnlyLongWrapper(dato.getValue().getId()));
         tipoCol.setCellValueFactory(dato -> new ReadOnlyStringWrapper(dato.getValue().getTipo()));
         patenteCol.setCellValueFactory(dato -> new ReadOnlyStringWrapper(dato.getValue().getPatente()));
         horasCol.setCellValueFactory(dato -> new ReadOnlyIntegerWrapper(dato.getValue().getHoras()));
@@ -61,9 +63,15 @@ public class MainController {
 
         estadiasTable.setItems(filas);
 
+        estadiasTable.getSelectionModel().selectedItemProperty().addListener((obs, anterior, seleccionada) -> {
+            if (seleccionada != null) {
+                nuevasHorasField.setText(String.valueOf(seleccionada.getHoras()));
+            }
+        });
+
         try {
             repository.cargar();
-            actualizarTabla();
+            mostrarTodosSinMensaje();
             mostrarMensaje("Estadías cargadas: " + filas.size() + ".", false);
         } catch (IOException | RuntimeException e) {
             mostrarMensaje("No se pudieron cargar los datos: " + e.getMessage(), true);
@@ -83,6 +91,9 @@ public class MainController {
         try {
             String tipo = tipoCombo.getValue();
             String patente = patenteField.getText().trim();
+            int horas = Integer.parseInt(nuevasHorasField.getText().trim());
+
+            Estadia nueva;
 
             if (tipo == null) {
                 throw new IllegalArgumentException("Seleccione Auto o Moto.");
@@ -91,9 +102,8 @@ public class MainController {
                 throw new IllegalArgumentException("La patente es obligatoria.");
             }
 
-            int horas = Integer.parseInt(horasField.getText().trim());
 
-            Estadia nueva;
+
             if ("Auto".equals(tipo)) {
                 nueva = new EstadiaAuto(patente, horas);
             } else if ("Moto".equals(tipo)) {
@@ -103,8 +113,9 @@ public class MainController {
             }
 
             repository.registrar(nueva);
-            actualizarTabla();
-            limpiarFormulario();
+            mostrarTodosSinMensaje();
+            indicarEstadisticasPendientes();
+
             mostrarMensaje(nueva.getTipo() + " " + nueva.getPatente()
                     + " registrada. Costo: " + formatearCosto(nueva.calcularCosto()), false);
 
@@ -127,6 +138,8 @@ public class MainController {
 
         try {
             repository.eliminar(seleccionada);
+            //mostrarTodosSinMensaje();
+            //indicarEstadisticasPendientes();
             actualizarTabla();
             mostrarMensaje("Estadía " + seleccionada.getPatente() + " eliminada.", false);
         } catch (IllegalArgumentException e) {
@@ -136,11 +149,55 @@ public class MainController {
         }
     }
 
-    private void actualizarTabla() {
-        filas.setAll(repository.listar());
+    @FXML
+    private void actualizarHoras(){
+
     }
 
-    private void limpiarFormulario() {
+    @FXML
+    private void buscarPorPatente(){
+
+    }
+
+    @FXML
+    private void mostrarEstadisticas() {
+        try {
+            List<ResumenTipo> datos = repository.resumenPorTipo();
+            if (datos.isEmpty()) {
+                estadisticasLabel.setText("No se encontró ningúna estadistica.");
+                return;
+            }
+            StringBuilder texto = new StringBuilder("Estadisticas: ");
+            long total = 0;
+            for (ResumenTipo resumen : datos) {
+                if (total > 0) texto.append("|");
+                texto.append(resumen.tipo()).append(":")
+                        .append(resumen.cantidad());
+                total += resumen.cantidad();
+            }
+            texto.append("| Total: ").append(total);
+            estadisticasLabel.setText(texto.toString());
+        } catch (IOException e) {
+            mostrarMensaje("No se encontró estadisticas.", true);
+        }
+    }
+
+    @FXML
+    private void mostrarTodos(){
+
+    }
+
+    private void mostrarTodosSinMensaje(){
+        filas.setAll(repository.listar());
+        estadiasTable.getSelectionModel().clearSelection();
+        nuevasHorasField.clear();
+    }
+
+    private void indicarEstadisticasPendientes(){
+        estadisticasLabel.setText("Estadisticas: pulsa el botón para actualizar.")
+    }
+
+    private void limpiarRegistro() {
         patenteField.clear();
         horasField.clear();
         convenioCheck.setSelected(false);
@@ -156,5 +213,9 @@ public class MainController {
 
     private String formatearCosto(int costo) {
         return "$" + formatoPesos.format(costo);
+    }
+
+    private TextFormatter<String> soloNumeros(){
+        return new TextFormatter<>(cambio -> cambio.getControlText().matches("[0-9]<") ? cambio : null);
     }
 }
